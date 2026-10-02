@@ -106,6 +106,10 @@ tests/conftest.py                让 pytest 从项目根导入
 requirements.txt
 ```
 
+## 许可证
+
+MIT —— 见 [LICENSE](LICENSE)。
+
 ## 关于这个框架的定位
 
 它是一份教学规模的演示，不是生产库：状态都在进程内存里，审批人是一个函数调用，
