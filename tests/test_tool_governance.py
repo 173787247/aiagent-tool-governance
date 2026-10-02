@@ -1,10 +1,10 @@
-"""第二章作业验收：转账工具（transfer）的 5 个链路测试。
+"""转账工具（transfer）的 5 个链路测试。
 
-约法三章（作业"不能改动的地方"）：
+约束：
 - 所有调用都经过 `ToolRuntime.invoke`，不直接调 handler。
 - 不改 `PermissionEngine.decide` 的优先级顺序，测试只观察它的输出。
 
-未完成对应任务时，测试给的是"哪一步没做"的失败信息，而不是导入错误：
+缺少某个接入点时，测试给的是"哪一步没做"的失败信息，而不是导入错误：
 缺少 `ACCOUNTS` 会命中 `accounts()` 的断言，没注册 transfer 工具会拿到 `TOOL_NOT_FOUND`。
 """
 
@@ -50,13 +50,13 @@ def transfer_context(**overrides: Any) -> demo.ExecutionContext:
 
 def accounts() -> dict[tuple[str, str], float]:
     store = getattr(demo, "ACCOUNTS", None)
-    assert isinstance(store, dict), "任务 1 未完成：tool_governance_demo.ACCOUNTS 不存在"
+    assert isinstance(store, dict), "tool_governance_demo.ACCOUNTS 不存在"
     return store
 
 
 def balance(account: str, tenant_id: str = "tenant_a") -> float:
     store = accounts()
-    assert (tenant_id, account) in store, f"任务 1 未完成：ACCOUNTS 缺少 {(tenant_id, account)}"
+    assert (tenant_id, account) in store, f"ACCOUNTS 缺少 {(tenant_id, account)}"
     return store[(tenant_id, account)]
 
 

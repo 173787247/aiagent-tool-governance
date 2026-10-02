@@ -1,26 +1,24 @@
-"""第二章实战作业：为治理框架增加"转账"工具。
+"""工具治理框架：Pydantic 校验 → 权限状态机 → 一次性审批 → 超时恢复 → 结果脱敏 → 审计追踪。
 
-这是 `tool_governance_demo.py` 的填空版本：治理框架本身（Pydantic 校验 →
-权限状态机 → 一次性审批 → 超时恢复 → 结果脱敏 → 审计追踪）已经完整可运行，
-要做的是把 `transfer` 工具接进去，让这整条链路真正跑一遍。
+仓库里附带一个完整的示例工具 `transfer`（转账），演示如何把一个高风险写工具接进框架。
 
-六个填空位置（搜索 `任务 N 完成` 可定位）：
+六个接入点（搜索 `# =====` 可定位）：
 
-    任务 1  新建 ACCOUNTS 模拟账户数据
-    任务 2  定义 TransferArgs 参数模型
-    任务 3  实现 transfer_precheck 业务预检
-    任务 4  实现 transfer_handler 转账处理
-    任务 5  在 build_tools() 里注册 transfer 工具
-    任务 6  在 _redact 里追加账号脱敏
+    ACCOUNTS            模拟账户数据
+    TransferArgs        转账参数模型
+    transfer_precheck   业务预检
+    transfer_handler    转账处理
+    build_tools()       注册 transfer 工具
+    _redact             账号脱敏
 
 验收命令：
 
     python -m pytest tests/test_tool_governance.py -v -k "transfer"
 
-不能改动的地方：
+框架的固定约束：
 
-    1. PermissionEngine.decide 里一行都没动，它的优先级顺序是固定框架。
-    2. 测试里没有绕过 ToolRuntime.invoke，所有调用都走 runtime.invoke()。
+    1. PermissionEngine.decide 的优先级顺序是固定框架，一行未动。
+    2. 测试不绕过 ToolRuntime.invoke，所有调用都走 runtime.invoke()。
     3. TransferArgs 的 extra="forbid" 保留（继承自 StrictArgs，是防注入的最后屏障）。
 """
 
@@ -111,7 +109,7 @@ class RunShellArgs(StrictArgs):
     command: str = Field(min_length=1, max_length=200)
 
 
-# ===== 任务 2 完成：定义转账参数模型 =====
+# ===== 转账参数模型 =====
 # 与 CreateRefundArgs 同一套写法：Field 约束写在声明上，StrictArgs 提供
 # extra="forbid" 与 strict=True —— 前者挡住模型注入的多余键，后者挡住
 # "100" 这样的字符串被悄悄转成数字。
@@ -339,7 +337,7 @@ def _redact(value: Any) -> Any:
         return [_redact(item) for item in value]
     if isinstance(value, str):
         value = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "***@***", value)
-        # ===== 任务 6 完成：账号脱敏 =====
+        # ===== 账号脱敏 =====
         # 用函数式替换而不是字符串替换：需要同时读前缀和末 4 位，
         # 字符串替换里写不出"保留末尾"这种引用（\1/\g<1> 只能引用捕获组，
         # 而末 4 位要先知道总长度）。
@@ -639,7 +637,7 @@ ORDERS = {
     }
 }
 
-# ===== 任务 1 完成：新增模拟账户数据 =====
+# ===== 模拟账户数据 =====
 # 模块级可变状态：测试用 isolated_accounts fixture 逐用例快照还原，
 # 所以必须是普通 dict，不能写成 MappingProxy 或 frozenset 之类只读结构。
 ACCOUNTS: dict[tuple[str, str], float] = {
@@ -678,7 +676,7 @@ async def refund_precheck(raw_arguments: ArgsModel, context: ExecutionContext) -
         raise PolicyDenied("BUSINESS_RULE_DENIED", "退款金额超过可退金额")
 
 
-# ===== 任务 3 完成：实现业务预检 =====
+# ===== 业务预检 =====
 # 只做判断、不改余额。顺序即优先级：先拦教学区间，再查余额 ——
 # 一次调用只应因为一个原因被拒，先命中哪个就报哪个码。
 async def transfer_precheck(raw_arguments: ArgsModel, context: ExecutionContext) -> None:
@@ -686,7 +684,7 @@ async def transfer_precheck(raw_arguments: ArgsModel, context: ExecutionContext)
     assert isinstance(arguments, TransferArgs)
 
     # 1. 教学用的金额区间拦截。注意上界是闭区间：amount > 80_000 必须放过去，
-    #    任务 4 的超时演示要靠它。
+    #    超时演示要靠它。
     if 50_000 < arguments.amount <= 80_000:
         raise PolicyDenied(
             "EXCEED_LIMIT",
@@ -721,8 +719,8 @@ async def create_refund_handler(
     }
 
 
-# ===== 任务 4 完成：实现转账处理函数 =====
-# 两个副作用之间的顺序是这份作业的关键：sleep 必须在扣款之前。
+# ===== 转账处理 =====
+# 两个副作用之间的顺序是关键：sleep 必须在扣款之前。
 # 框架用 asyncio.timeout 掐断执行，取消发生在第一个 await 点上；
 # 只要扣款排在 sleep 后面，超时那一刻余额就还没动过 ——
 # 这正是测试要断言的 "balances untouched"。
@@ -802,9 +800,9 @@ def build_tools() -> list[ToolDefinition]:
             handler=simulated_shell_handler,
             canonical_target=lambda args: str(getattr(args, "command")),
         ),
-        # ===== 任务 5 完成：注册 transfer 工具 =====
+        # ===== 注册 transfer 工具 =====
         # policy 与 create_refund 同类：WRITE + HIGH + 需要人工审批 + 非幂等 + max_retries=0。
-        # timeout_seconds 取 1.0 —— 必须小于任务 4 里 sleep(3.0) 那个演示值，
+        # timeout_seconds 取 1.0 —— 必须小于 sleep(3.0) 那个演示值，
         # 否则框架等不到超时，测试会真的睡满 3 秒然后扣款成功。
         # canonical_target 用三段拼接：金额必须进摘要，否则"改了金额再用同一张审批"
         # 就能通过，参数绑定测试会失败。
